@@ -19,7 +19,7 @@ int main(int argc, char *argv[]) {
 
     MiniJavaLexer lex(inputFile);
 
-    lex.lex();
+    //lex.lex();
     
     std::cout << "Num lines: " << lex.num_lines << '\n'
                 << "Num chars: " << lex.num_chars << '\n';
