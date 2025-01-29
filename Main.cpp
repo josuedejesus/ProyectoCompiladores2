@@ -19,7 +19,11 @@ int main(int argc, char *argv[]) {
 
     MiniJavaLexer lex(inputFile);
 
-    //lex.lex();
+    Token token;
+
+    while ((token = lex.nextToken()) != Token::EndOfFile) {
+        std::cout << MiniJavaLexer::tokenToString(token) << std::endl;
+    }
     
     std::cout << "Num lines: " << lex.num_lines << '\n'
                 << "Num chars: " << lex.num_chars << '\n';
