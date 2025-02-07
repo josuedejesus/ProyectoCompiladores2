@@ -1,68 +1,37 @@
 %option lexer = "MiniJavaLexer"
 %option lex = "nextToken"
-%option token-type = "Token"
+%option params = "Expr::Parser::value_type *yylval"
+
 
 %{
  #include <iostream>
  #include "MiniJavaLexer.hpp"   
+ #include "MiniJavaParser.hpp"
 %}
 
 %top{
-#include "Tokens.hpp"
+    #include "MiniJavaParser.hpp"
 %}
 
 %class{
-public:
-    static const char *tokenToString(Token token) {
-        switch(token) {
-            case Token::KW_CLASS: return "CLASS";
-            case Token::KW_INT: return "INT";
-            case Token::KW_VOID: return "VOID";
-            case Token::KW_REF: return "REF";
-            case Token::KW_IF: return "IF";
-            case Token::KW_ELSE: return "ELSE";
-            case Token::KW_WHILE: return "WHILE";
-            case Token::KW_RETURN: return "RETURN";
-            case Token::KW_READ: return "READ";
-            case Token::KW_PRINT: return "PRINT";
-            case Token::DEC: return "DEC";
-            case Token::OP_BOOL_AND: return "OP_BOOL_AND";
-            case Token::OP_BOOL_OR: return "OP_BOOL_OR";
-            case Token::OP_BOOL_NOT: return "OP_BOOL_NOT";
-            case Token::OP_GREATER_THAN: return "OP_GREATER_THAN";
-            case Token::OP_LESS_THAN: return "OP_LESS_THAN";
-            case Token::OP_LESS_EQUAL: return "OP_LESS_EQUAL";
-            case Token::OP_EQUAL: return "OP_EQUAL";
-            case Token::OP_NOT_EQUAL: return "OP_NOT_EQUAL";
-            case Token::OP_ASSIGN: return "OP_ASSIGN";
-            case Token::OP_DIV: return "OP_DIV";
-            case Token::OP_MUL: return "OP_MUL";
-            case Token::OP_MOD: return "OP_MOD";
-            case Token::OP_GREATER_EQUAL: return "OP_GREATER_EQUAL";
-            case Token::STRING_LITERAL: return "STRING_LITERAL";
-            case Token::IDENTIFIER: return "IDENTIFIER";
-            case Token::OP_ADD: return "OP_ADD";
-            case Token::OP_SUB: return "OP_SUB";
-            case Token::SEMICOLON: return "SEMICOLON";
-            case Token::OPEN_CURLY: return "OPEN_CURLY";
-            case Token::CLOSE_CURLY: return "CLOSE_CURLY";
-            case Token::OPEN_BRACKET: return "OPEN_BRACKET";
-            case Token::CLOSE_BRACKET: return "CLOSE_BRACKET";
-            case Token::OPEN_PAR: return "OPEN_PAR";
-            case Token::CLOSE_PAR: return "CLOSE_PAR";
-            case Token::COMMA: return "COMMA";
-            case Token::EndOfFile: return "EndOfFile";
-            case Token::Error: return "Error: Unknown token";
-            default: return "UNKNOWN";
-        }
-    }
-
-    int num_lines = 0;
-    int num_chars = 0;
+using Token = Expr::Parser::token;
 %}
 
+%x COMMENT 
+
+DIGIT [0-9]
+
+
 %%
-\n { num_lines++; num_chars++; }
+//\n { num_lines++; num_chars++; }
+
+"//".* { /* ignore line comments */ }
+
+"/*"   start(COMMENT);  
+<COMMENT>[^*]+         { /* ignores anything but * */ }
+<COMMENT>"*"+[^*/]*    { /* ignores * */ }
+<COMMENT>"*"+"/"       start(INITIAL);  // block comment end
+<COMMENT><<EOF>>       { std::cerr << "Error: EOF en comentario de bloque\n"; return Token::Error; }
 
 
 /* Symbols */
@@ -106,11 +75,19 @@ public:
 
 
 
-0|[1-9][0-9]* { return Token::DEC; }
+
+{DIGIT}+ {
+    yylval->emplace<int>(std::stol(text(), nullptr, 10));
+    return Token::INT_CONST;
+}
+
 \"([^\\\"]|\\.)*\"   { return Token::STRING_LITERAL; }
-[a-zA-Z_][a-zA-Z0-9_]* { return Token::IDENTIFIER; }
+
+[_a-z_A-Z][_a-z_A-Z_0-9]* { 
+    yylval->emplace<std::string>(text());
+    return Token::IDENTIFIER; 
+}
 [ \t\r\n]+ { /* Ignorar espacios en blanco */ }
-#.* { /* Ignorar comentarios */ }
 <<EOF>> { return Token::EndOfFile; }
 . { return Token::Error; }
 

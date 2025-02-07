@@ -1,6 +1,8 @@
 #include "MiniJavaLexer.hpp"
-#include "iostream"
-#include "fstream"
+#include "MiniJavaParser.hpp"
+#include <iostream>
+#include <unordered_map>
+#include <fstream>
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
@@ -17,14 +19,14 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    std::unordered_map<std::string, int> vars;
     MiniJavaLexer lex(inputFile);
+    Expr::Parser parser(lex, vars);
 
-    Token token;
-
-    while ((token = lex.nextToken()) != Token::EndOfFile) {
-        std::cout << MiniJavaLexer::tokenToString(token) << std::endl;
+    try {
+        parser.parse();
+    } catch (const std::runtime_error &err) {
+        std::cerr << err.what() << '\n';
+        return 1;
     }
-    
-    std::cout << "Num lines: " << lex.num_lines << '\n'
-                << "Num chars: " << lex.num_chars << '\n';
 }
