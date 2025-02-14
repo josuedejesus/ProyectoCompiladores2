@@ -1,5 +1,6 @@
 #include "MiniJavaLexer.hpp"
 #include "MiniJavaParser.hpp"
+#include "MiniJavaAst.hpp"
 #include <iostream>
 #include <unordered_map>
 #include <fstream>
@@ -20,11 +21,16 @@ int main(int argc, char *argv[]) {
     }
 
     std::unordered_map<std::string, int> vars;
+
+    Ast::Node *root;
     MiniJavaLexer lex(inputFile);
     Expr::Parser parser(lex, vars);
 
     try {
         parser.parse();
+        std::cout << root->toString() << '\n';
+        std::cout << "Eval: " << eval(root, vars) << '\n';
+        //std::cout << Ast::toString() << '\n';
     } catch (const std::runtime_error &err) {
         std::cerr << err.what() << '\n';
         return 1;

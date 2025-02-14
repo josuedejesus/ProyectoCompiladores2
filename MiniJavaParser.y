@@ -1,7 +1,7 @@
 %require "3.0"
 %language "c++"
 %parse-param {MiniJavaLexer& lexer}
-%parse-param {std::unordered_map<std::string, int>& vars}
+%parse-param {Ast::Node*& root}
 
 %define parse.error verbose
 %define api.value.type variant
@@ -10,6 +10,7 @@
 
 %code requires {
     #include <unordered_map>
+    #include <MiniJavaAst.hpp>
     class MiniJavaLexer;
 }
 
@@ -72,19 +73,50 @@
 %token<std::string> IDENTIFIER "identifier"
 %token Error "unknown token"
 
-%type <int> expr term factor
+%type <Ast::Node *> expr term factor
 
 %%
 
-program: KW_CLASS class_name OPEN_CURLY method_declaration_list CLOSE_CURLY;
+program: KW_CLASS class_name OPEN_CURLY method_list CLOSE_CURLY {
+    root = new Ast::Program($2, $4);
+};
 
-class_name: IDENTIFIER;
+class_name: IDENTIFIER {
+    $$ = std::string($1);
+};
 
-method_declaration_list: method_declaration | method_declaration_list method_declaration;
+method_list: method_declaration {
+    $$ = new Ast::NodeList($1, NULL);
+} | method_list method_declaration {
+    $$ = new Ast::NodeList($1, $2);
+};
 
-method_declaration: KW_VOID IDENTIFIER OPEN_PAR opt_parameter_list CLOSE_PAR;
+method_declaration: KW_VOID IDENTIFIER OPEN_PAR opt_parameter_list CLOSE_PAR block {
+    $$ = new Ast::MethodDeclaration($2, $4, $6);
+};
 
-opt_parameter_list: parameter;
+opt_parameter_list: parameter {
+    $$ = new Ast::NodeList($1, nullptr);
+} | opt_parameter_list COMMA parameter {
+    $$ = new Ast::NodeList($1, $2);
+};
+
+block: statement {
+    $$ = new Ast::Block($1);
+};
+
+//statement_list: statement_list SEMICOLON statement { $$ = new Ast:LineSeq($1, $3); } | statement { $$ = new Ast::LineSeq($1, nullptr); };
+
+statement_list: statement_list SEMICOLON statement { 
+    $$ = new Ast:NodeList($1, $3); 
+} | statement {
+    $$ = new Ast::NodeList($1, nullptr); 
+};
+
+
+statement: block | { $$ = $1; };
+
+
 
 parameter: ;
 
@@ -92,9 +124,7 @@ input: statement_list opt_semicolon;
 
 opt_semicolon: SEMICOLON statement | %empty;
 
-statement_list: statement_list SEMICOLON statement | statement;
 
-statement: expr { std::cout << $1 << '\n'; };
 
 expr: 
     expr "+" term { $$ = $1 + $3; }
@@ -103,30 +133,19 @@ expr:
     ;
 
 term: 
-    term OP_MUL factor { $$ = $1 * $3; }
+    term OP_MUL factor { $$ = new Ast::MulExpr($1, $3); }
     | term OP_DIV factor {
-        if ($3 == 0) {
-            error("Division by zero");
-        } else {
-            $$ = $1 / $3;
-        }
+        $$ = new Ast::DivExpr($1, $3);
     }
     | term OP_MOD factor {
-        if ($3 == 0) {
-            error("Division by zero");
-        } else {
-            $$ = $1 % $3;
-        }
+        $$ = new Ast::ModExpr($1, $3);
     }
     | factor { $$ = $1; }
     ;
 
-factor: INT_CONST { $$ = $1; } | OPEN_PAR expr CLOSE_PAR { $$ = $2; } | IDENTIFIER {
-    auto it = vars.find($1);
-    if (it == vars.end()) {
-        error("Unknown variable: " + $1);
-    } else {
-        $$ = it->second;
-    }
+factor: INT_CONST { $$ = new Ast::INT_CONST($1); }
+ | OPEN_PAR expr CLOSE_PAR { $$ = $2; } 
+ | IDENTIFIER {
+    $$ = new Ast::Identifier($1);
 }
 %%

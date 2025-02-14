@@ -1,0 +1,154 @@
+%option lang = "C++"
+%option namespace = "Ast"
+
+%decls %{
+    #include <string>
+    #include <ostream>
+    using string_t = std::string;
+    using symbol_table = std::unordered_map<std::string, int>;
+}%
+
+%{
+#include <string>
+#include "ExprAst.hpp"
+%}
+
+%node Node %abstract %typedef
+
+%node NodeList Node = {
+    Node *first_node;
+    Node *next_node;
+}
+
+%node Program Node = {
+    string_t name;
+    Node *method_list;
+}
+
+%node MethodDeclaration Node = {
+    string_t name
+    Node *parameter_list;
+    Node *block;
+}
+
+%node Parameter Node = {
+    Node *identifier;
+}
+
+%node Block Node = {
+    Node *statement_list;
+}
+
+%node VariableDeclaration = {
+    //type
+    Node identifier_list;
+}
+
+%node ArrayDeclaration = {
+    int size;
+    Node identifier;
+}
+
+%node Assigment = {
+    Node *identifier;
+    Node *value
+}
+
+%node ArrayAssigment = {
+    Node *identifier;
+    Node *index;
+    Node *value
+}
+
+%node Expr Node %abstract %typedef
+
+%node Number Expr = {
+    int value;
+}
+
+%node Identifier Expr = {
+    string_t name;
+}
+
+%node BinaryExpr Expr %abstract = {
+    Node *left;
+    Node *right;
+}
+
+%node AddExpr BinaryExpr
+%node SubExpr BinaryExpr
+%node MulExpr BinaryExpr
+%node DivExpr BinaryExpr
+
+%operation %virtual string_t toString(Node *node) = {""}
+%operation int eval(Node *node, symbol_table_t& vars) = {0}
+
+toString(Program) {
+    std::ostringstream os;
+
+    os << "Program(" << toString(node->lines) << ")";
+
+    if (node)
+
+    return os.str();
+}
+
+toString(LineSeq) {
+    std::ostringstream os;
+
+    os << "LineSeq(" << toString(node->LineSeq) << ")";
+
+    return os.str();
+}
+
+toString(Number) {
+    return std::to_string(value);
+}
+
+toString(Identifier) {
+    return name;
+}
+
+
+
+eval (Program) {
+    return eval(node->lines, vars)
+}
+
+eval (LineSeq) {
+    
+}
+
+
+eval (Number) {
+    return value;
+}
+
+eval Identifier Expr = {
+    auto it = vars.find(name);
+
+    if (it == vars.end()) {
+        throw std::runtime_error("variable not found");
+
+    }
+
+    return it->second;
+}
+
+eval BinaryExpr Expr %abstract = {
+    Node *left;
+    Node *right;
+}
+
+eval (AddExpr) {
+    return eval(node->left, vars) + eval(node->right, vars);
+}
+eval (SubExpr) {
+    return eval(node->left, vars) + eval(node->right, vars);
+}
+eval (MulExpr) {
+    return eval(node->left, vars) + eval(node->right, vars);
+}
+eval (DivExpr) {
+    return eval(node->left, vars) + eval(node->right, vars);    
+}
