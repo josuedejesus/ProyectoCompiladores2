@@ -4,13 +4,57 @@
 %decls %{
     #include <string>
     #include <ostream>
+    #include <unordered_map> 
+    #include "MiniJavaAst.hpp"
+
+    struct CodegenResult {
+        std::string code;
+        std::string place;
+    };
+
+    namespace Ast{
+        class Node;
+    };
+
+    enum class RetType {
+        VOID,
+        INT
+    };
+
     using string_t = std::string;
-    using symbol_table = std::unordered_map<std::string, int>;
-}%
+    using symbol_table_t = std::unordered_map<std::string, std::string>;
+    using type_table_t = std::unordered_map<std::string, std::string>;
+    using literal_table_t = std::unordered_map<std::string, std::string>;
+    using function_table_t = std::unordered_map<std::string, Ast::Node*>;
+%}
 
 %{
 #include <string>
-#include "ExprAst.hpp"
+#include <sstream> 
+#include "MiniJavaAst.hpp"
+
+std::string newVariable() {
+    static int index = 0;
+
+    return "%t" + std::to_string(index++);
+}
+
+std::string newLabel() {
+    static int index = 0;
+
+    return "lb" + std::to_string(index++);
+}
+
+std::string newTag() {
+    static int index = 0;
+
+    return "@.tx" + std::to_string(index++);
+}
+
+std::string current_function_type;
+Ast::Node* current_method;
+bool has_return = false;
+
 %}
 
 %node Node %abstract %typedef
@@ -20,45 +64,109 @@
     Node *next_node;
 }
 
+%node ParameterList Node = {
+    Node *first_node;
+    Node *next_node;
+}
+
+%node ArgumentList Expr = {
+    Node *first_node;
+    Node *next_node;
+}
+
+%node VariableList Node = {
+    bool is_global;
+    string_t identifier;
+    Node *next_node;
+}
+
 %node Program Node = {
+    string_t class_name;
+    Node *class_body;
+}
+
+%node Type Node = {
     string_t name;
-    Node *method_list;
 }
 
 %node MethodDeclaration Node = {
-    string_t name
+    Node *type;
+    string_t name;
     Node *parameter_list;
     Node *block;
 }
 
 %node Parameter Node = {
-    Node *identifier;
+    bool is_ref;
+    string_t identifier;
+}
+
+%node ArrayParameter Node = {
+    bool is_ref;
+    int index;
+    string_t identifier;
 }
 
 %node Block Node = {
     Node *statement_list;
 }
 
-%node VariableDeclaration = {
-    //type
-    Node identifier_list;
+%node VariableDeclaration Node = {
+    Node *identifier_list;
 }
 
-%node ArrayDeclaration = {
+%node ArrayDeclaration Node = {
+    bool is_global;
+    string_t identifier;
     int size;
-    Node identifier;
 }
 
-%node Assigment = {
-    Node *identifier;
-    Node *value
+
+
+%node Assignment Node = {
+    string_t identifier;
+    Expr *expr;
 }
 
-%node ArrayAssigment = {
-    Node *identifier;
-    Node *index;
-    Node *value
+%node ArrayAssignment Node = {
+    string_t array_identifier;
+    Node *index_expr;
+    Expr *expr;
 }
+
+%node MethodCall Node = {
+    string_t identifier;
+    Node *argument_list;
+}
+
+%node IfStmt Node = {
+    BooleanExpr *expr;
+    Node *if_stmts;
+    Node *else_stmts;
+}
+
+%node WhileStmt Node = {
+    BooleanExpr *expr;
+    Node *stmts;
+}
+
+%node PrintStmt Node = {
+    Node *expr;
+}
+
+%node PrintStmtLit Node = {
+    string_t literal;
+}
+
+%node ReturnStmt Node = {
+    Node *expr;
+}
+
+%node StringLiteral Node = {
+    string_t value;
+}
+
+
 
 %node Expr Node %abstract %typedef
 
@@ -70,85 +178,1469 @@
     string_t name;
 }
 
-%node BinaryExpr Expr %abstract = {
-    Node *left;
-    Node *right;
+%node ArrayVariable Expr = {
+    string_t identifier;
+    Expr *expr;
 }
+
+%node FunctionCall Expr = {
+    string_t identifier;
+    Node *argument_list;
+}
+
+%node Argument Expr = {
+    bool is_ref;
+    string_t identifier;
+    Expr *expr;
+}
+
+%node ArrayArgument Expr = {
+    bool is_ref;
+    Expr *expr;
+    string_t identifier;
+}
+
+%node BinaryExpr Expr %abstract = {
+    Expr *left;
+    Expr *right;
+}
+
 
 %node AddExpr BinaryExpr
 %node SubExpr BinaryExpr
 %node MulExpr BinaryExpr
 %node DivExpr BinaryExpr
+%node ModExpr BinaryExpr
+
+%node BooleanExpr Node %abstract %typedef
+
+%node BinaryBooleanExpr BooleanExpr %abstract = {
+    BooleanExpr *left;
+    BooleanExpr *right;
+}
+
+%node AndExpr BinaryBooleanExpr
+%node OrExpr BinaryBooleanExpr
+
+%node RelationalExpr BooleanExpr %abstract %typedef
+
+%node BinaryRelationalExpr RelationalExpr %abstract = {
+    Expr *left;
+    Expr *right;
+}
+
+%node GreaterExpr BinaryRelationalExpr
+%node GreaterEqualExpr BinaryRelationalExpr
+%node LessExpr BinaryRelationalExpr
+%node LessEqualExpr BinaryRelationalExpr
+%node EqualExpr BinaryRelationalExpr
+%node NotEqualExpr BinaryRelationalExpr
 
 %operation %virtual string_t toString(Node *node) = {""}
-%operation int eval(Node *node, symbol_table_t& vars) = {0}
+%operation void getFunction(Node *root, function_table_t &functions)
+%operation CodegenResult exprCompile(Node *root, type_table_t &types, literal_table_t &literals, function_table_t &functions, symbol_table_t &vars) = {CodegenResult({})}
+
+getFunction(Node) {
+
+}
+
+getFunction(MethodDeclaration) {
+    auto it = functions.find(root->name);
+
+    if (it != functions.end()) {
+        throw std::runtime_error("Function '" + root->name + "' was already declared.");
+    }
+
+    functions.emplace(root->name, root);
+
+    //functions[root->name] = root;
+
+}
+
+
+toString(Type) {
+    std::ostringstream os;
+
+    os << "Type(" << node->name << ")";
+
+    return os.str();
+}
 
 toString(Program) {
     std::ostringstream os;
 
-    os << "Program(" << toString(node->lines) << ")";
-
-    if (node)
+    os << "Program(" << node->class_body->toString() << ")";
 
     return os.str();
 }
 
-toString(LineSeq) {
+toString(NodeList) {
     std::ostringstream os;
 
-    os << "LineSeq(" << toString(node->LineSeq) << ")";
+    os << "NodeList(" << node->first_node->toString();
+
+    if (node->next_node) {
+        os << ", " << node->next_node->toString();
+    }
+    
+    os << ")";
 
     return os.str();
 }
 
-toString(Number) {
-    return std::to_string(value);
-}
+toString(ParameterList) {
+    std::ostringstream os;
 
-toString(Identifier) {
-    return name;
-}
+    os << "ParameterList(" << node->first_node->toString();
 
-
-
-eval (Program) {
-    return eval(node->lines, vars)
-}
-
-eval (LineSeq) {
+    if (node->next_node) {
+        os << ", " << node->next_node->toString();
+    }
     
+    os << ")";
+
+    return os.str();
 }
 
+toString(ArgumentList) {
+    std::ostringstream os;
 
-eval (Number) {
-    return value;
+    os << "ArgumentList(" << node->first_node->toString();
+
+    if (node->next_node) {
+        os << ", " << node->next_node->toString();
+    }
+    
+    os << ")";
+
+    return os.str();
 }
 
-eval Identifier Expr = {
-    auto it = vars.find(name);
+toString(VariableList) {
+    std::ostringstream os;
 
-    if (it == vars.end()) {
-        throw std::runtime_error("variable not found");
+    os << "VariableList(" << node->identifier;
+
+    if (node->next_node) {
+        os << ", " << node->next_node;
+    }
+    
+    os << ")";
+
+    return os.str();
+}
+
+toString(MethodDeclaration) {
+    std::ostringstream os;
+
+    os << "MethodDeclaration(";
+
+    if(node->parameter_list) {
+        os << ", " << node->parameter_list->toString();
+    }
+
+    os << node->block->toString() << ")";
+
+    return os.str();
+}
+
+toString(Parameter) {
+    std::ostringstream os;
+
+    os << "Parameter(" << node->identifier << ")";
+
+    return os.str();
+}
+
+toString(ArrayParameter) {
+    std::ostringstream os;
+
+    os << "ArrayParameter(" << node->identifier << ")";
+
+    return os.str();
+}
+
+toString(ArrayArgument) {
+    std::ostringstream os;
+
+    os << "ArrayArgument(" << node->identifier << ")";
+
+    return os.str();
+}
+
+toString(Argument) {
+    std::ostringstream os;
+
+    if (node->expr) {
+        os << "Argument(" << node->expr->toString() << ")";
+
+    } else {
+        os << "Argument(" << node->identifier << ")";
 
     }
 
-    return it->second;
+
+    return os.str();
 }
 
-eval BinaryExpr Expr %abstract = {
-    Node *left;
-    Node *right;
+toString(Block) {
+    std::ostringstream os;
+
+    os << "Block(" << node->statement_list->toString() << ")";
+
+    return os.str();
 }
 
-eval (AddExpr) {
-    return eval(node->left, vars) + eval(node->right, vars);
+toString(VariableDeclaration) {
+    std::ostringstream os;
+
+    os << "VariableDeclaration(" << node->identifier_list->toString() << ")";
+
+
+    return os.str();
 }
-eval (SubExpr) {
-    return eval(node->left, vars) + eval(node->right, vars);
+
+toString(ArrayDeclaration) {
+    std::ostringstream os;
+
+    os << "ArrayDeclaration(" << node->identifier << ")";
+
+    return os.str();
 }
-eval (MulExpr) {
-    return eval(node->left, vars) + eval(node->right, vars);
+
+toString(ArrayVariable) {
+    std::ostringstream os;
+
+    os << "ArrayVariable(" << node->identifier << node->expr->toString() << ")";
+
+    return os.str();
 }
-eval (DivExpr) {
-    return eval(node->left, vars) + eval(node->right, vars);    
+
+toString(Assignment) {
+    std::ostringstream os;
+
+    os << "Assignment(" << node->identifier << ", " << node->expr->toString() << ")";
+
+    return os.str();
+}
+
+toString(ArrayAssignment) {
+    std::ostringstream os;
+
+    os << "ArrayAssignment(" << node->array_identifier << "[" << node->index_expr->toString() << "]" << ", " << node->expr->toString() << ")";
+
+    return os.str();
+}
+
+toString(MethodCall) {
+    std::ostringstream os;
+
+    os << "MethodCall(" << node->identifier;
+
+    if(node->argument_list) {
+        os << ", " << node->argument_list->toString();
+
+    }
+
+    os << ")";
+
+    return os.str();
+}
+
+toString(FunctionCall) {
+    std::ostringstream os;
+
+    os << "FunctionCall(" << node->identifier;
+
+    if (node->argument_list) {
+        os << ", " << node->argument_list->toString();
+
+    }
+
+    os << ")";
+
+    return os.str();
+}
+
+toString(IfStmt) {
+    std::ostringstream os;
+
+    os << "IfStmt(" << node->expr->toString() << ", " << node->if_stmts->toString();
+
+    if(node->else_stmts) {
+        os << ", " << node->else_stmts->toString();
+    }
+
+    os << ")";
+
+    return os.str();
+}
+
+toString(WhileStmt) {
+    std::ostringstream os;
+
+    os << "WhileStmt(" << node->expr->toString() << ", " << node->stmts->toString() << ")";
+
+    return os.str();
+}
+
+toString(PrintStmt) {
+    std::ostringstream os;
+
+    os << "PrintStmt(" << node->expr->toString() << ")";
+
+    return os.str();
+}
+
+toString(PrintStmtLit) {
+    std::ostringstream os;
+
+    os << "PrintStmtLit(" << node->literal << ")";
+
+    return os.str();
+}
+
+toString(ReturnStmt) {
+    std::ostringstream os;
+
+    os << "ReturnStmt(" << node->expr->toString() << ")";
+
+
+    return os.str();
+}
+
+toString(StringLiteral) {
+    std::ostringstream os;
+
+    os << "StringLiteral(" << node->value << ")";
+
+    return os.str();
+}
+
+toString(AddExpr) {
+    std::ostringstream os;
+
+    os << "AddExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+    return os.str(); 
+}
+
+toString(SubExpr) {
+    std::ostringstream os;
+
+    os << "SubExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+    return os.str(); 
+}
+
+toString(MulExpr) {
+    std::ostringstream os;
+
+    os << "MulExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+    return os.str(); 
+}
+
+toString(DivExpr) {
+    std::ostringstream os;
+
+    os << "DivExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+
+    return os.str(); 
+}
+
+toString(ModExpr) {
+    std::ostringstream os;
+
+    os << "ModExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+    return os.str(); 
+}
+
+toString(GreaterExpr) {
+    std::ostringstream os;
+
+    os << "GreaterExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+    return os.str(); 
+}
+
+toString(GreaterEqualExpr) {
+    std::ostringstream os;
+
+    os << "GreaterEqualExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+    return os.str(); 
+}
+
+
+toString(LessExpr) {
+    std::ostringstream os;
+
+    os << "LessExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+    return os.str(); 
+}
+
+toString(LessEqualExpr) {
+    std::ostringstream os;
+
+    os << "LessEqualExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+
+    return os.str(); 
+}
+
+toString(EqualExpr) {
+    std::ostringstream os;
+
+    os << "EqualExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+    return os.str(); 
+}
+
+toString(NotEqualExpr) {
+    std::ostringstream os;
+
+    os << "NotEqualExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+    return os.str(); 
+}
+
+toString(AndExpr) {
+    std::ostringstream os;
+
+    os << "AndExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+    return os.str(); 
+}
+
+toString(OrExpr) {
+    std::ostringstream os;
+
+    os << "OrExpr(" << node->left->toString() << ", " << node->right->toString() << ")";
+
+    return os.str(); 
+}
+
+toString(Number) {
+    return std::to_string(node->value);
+}
+
+toString(Identifier) {
+    return node->name;
+}
+
+
+
+
+
+exprCompile(Program) {
+    getFunction(root->class_body, functions);
+
+    
+
+    CodegenResult r = exprCompile(root->class_body, types, literals, functions, vars);
+
+    std::ostringstream os;
+
+    os << "declare void @exit(i32)\n";
+    os << "declare i32 @printf(i8*, ...)\n";
+
+    os << r.code;
+
+    auto it = functions.find("main");
+    if (it == functions.end()) {
+        throw std::runtime_error("Error: A 'main' function is required.");
+    }
+
+    os << "@.fmt = private constant [4 x i8] c\"%d\\0A\\00\", align 1\n";
+    for (const auto& [lit, var] : literals) {
+        int size = lit.size() + 2;
+        os << var << " = private constant [" << size << " x i8] c\"" + lit + "\\0A\\00\", align 1\n";
+    }
+    return {os.str(), ""};
+}
+
+exprCompile(NodeList) {
+    std::ostringstream os;
+
+    getFunction(root->first_node, functions);
+
+
+    CodegenResult res;
+
+    CodegenResult r1 = exprCompile(root->first_node, types, literals, functions, vars);
+
+    os << r1.code;
+    res.place = r1.place;
+
+    if (root->next_node) {
+        getFunction(root->next_node, functions);
+
+
+        CodegenResult r2 = exprCompile(root->next_node, types, literals, functions, vars);
+        os << "\n" << r2.code;
+        res.place = r2.place;  
+    }
+
+    res.code = os.str();
+
+    return res;
+}
+
+exprCompile(ParameterList) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->first_node, types, literals, functions, vars);
+
+    os << r1.code;
+
+    if (root->next_node) {
+
+        CodegenResult r2 = exprCompile(root->next_node, types, literals, functions, vars);
+        os << ", " << r2.code;  
+    }
+    return {os.str(), ""};
+}
+
+exprCompile(ArgumentList) {
+    std::ostringstream os;
+
+    CodegenResult res;
+    CodegenResult r1 = exprCompile(root->first_node, types, literals, functions, vars);
+    
+    os << r1.code;
+    res.place = r1.place;
+
+    if (root->next_node) {
+        CodegenResult r2 = exprCompile(root->next_node, types, literals, functions, vars);
+        os << "\n" << r2.code;
+        res.place += ", " + r2.place;
+    }
+
+    res.code = os.str();
+
+    return res;
+}
+
+exprCompile(VariableList) {
+    std::ostringstream os;
+
+    auto it = types.find(root->identifier);
+
+    if (it != types.end()) {
+        throw std::runtime_error("Variable \"" + root->identifier + "\" already declared.");
+    }
+
+    if(root->is_global) {
+        os << "@" << root->identifier << " = global i32 0, align 4\n";
+        types.emplace(root->identifier, "@");
+        vars.emplace(root->identifier, "");
+    } else {
+        os << "%" << root->identifier << " = alloca i32, align 4\n";
+        //types.emplace(root->identifier, "");
+        vars.emplace(root->identifier, "");
+    }
+
+    if (root->next_node) {
+        CodegenResult r2 = exprCompile(root->next_node, types, literals, functions, vars);
+        os << r2.code;
+    }
+
+    return {os.str(), ""};
+}
+
+exprCompile(MethodDeclaration) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->type, types, literals, functions, vars);
+    current_function_type = r1.code;
+
+    os << "define " << r1.code << " @" << root->name << "(";
+
+    if (root->parameter_list) {
+        CodegenResult r2 = exprCompile(root->parameter_list, types, literals, functions, vars);
+        os << r2.code;
+    }
+
+    os << ") {\n";
+
+    os << "entry:\n";
+
+    CodegenResult r3 = exprCompile(root->block, types, literals, functions, vars);
+
+    os << r3.code << "\n";
+
+    if (current_function_type.find("void") != std::string::npos) {
+        os << "ret void\n"; 
+    } else {
+        if (!has_return) {
+            os << "ret i32 0\n";
+        }
+    }
+
+    os << "}\n";
+
+    return {os.str(), ""};
+}
+
+exprCompile(Type) {
+    std::ostringstream os;
+
+    if (root->name == "void") {
+        os << "void";
+    } else if (root->name == "int") {
+        os << "i32";
+    }
+
+    return {os.str(), ""};
+}
+
+exprCompile(Parameter) {
+    std::ostringstream os;
+
+    std::string type = "i32";
+
+    os << "i32";
+
+    if (root->is_ref) {
+        os << "*";
+        type = "*";
+    }
+
+    CodegenResult r1;
+    r1.place = root->identifier;
+
+    os << " %" << r1.place;
+
+    r1.code = os.str();
+
+    types.emplace(r1.place, type);
+    vars.emplace(r1.place, "");
+
+
+    return r1;
+}
+
+exprCompile(Argument) {
+    std::ostringstream os;
+
+    CodegenResult r1;
+
+    std::string type = "";
+    std::string ref = "";
+
+    if (auto* params = dynamic_cast<ParameterList*>(current_method)) {
+        Node* firstNode = params->first_node;
+
+        
+
+        if (auto* param = dynamic_cast<Parameter*>(firstNode)) {
+            if (param->is_ref) {
+                auto* id = dynamic_cast<Identifier*>(root->expr);
+                r1.place = "i32* %" + id->name;
+            } else if (root->expr) {
+                if (root->expr) {
+                    r1 = exprCompile(root->expr, types, literals, functions, vars);
+                }
+                r1.place = "i32" + ref + " " + r1.place;
+            } else {
+                r1.place = "i32" + ref + " %" + root->identifier;
+            }
+        } else if (auto* param = dynamic_cast<ArrayParameter*>(firstNode)) {
+            if (root->expr) {
+                r1 = exprCompile(root->expr, types, literals, functions, vars);
+            }
+            r1.place = "[" + std::to_string(param->index) + " x i32]* " + r1.place;
+        } else {
+            throw std::runtime_error("Error: Unknown argument type.");
+        }
+        current_method = params->next_node;
+    }
+
+    os << r1.code;
+    
+    r1.code = os.str();
+
+    types.emplace(r1.place, ref);
+
+    return r1;
+}
+
+exprCompile(ArrayParameter) {
+    std::ostringstream os;
+
+    std::string ref = "";
+
+    //CodegenResult index = exprCompile(root->expr, types, literals, functions, vars);
+
+    os << "[" << std::to_string(root->index) << " x i32]*";
+
+    ref = "[" + std::to_string(root->index) + " x i32]* ";
+
+    CodegenResult r1;
+    r1.place = root->identifier;
+
+    os << " %" << r1.place;
+
+    r1.code = os.str();
+
+    types.emplace(r1.place, ref);
+
+    return r1;
+}
+
+exprCompile(ArrayArgument) {
+    std::ostringstream os;
+
+    std::string ref = "";
+
+    CodegenResult index = exprCompile(root->expr, types, literals, functions, vars);
+
+    os << "[" << index.place << " x i32]*";
+
+    CodegenResult r1;
+    r1.place = root->identifier;
+
+    os << " %" << r1.place;
+
+    r1.code = os.str();
+
+    types.emplace(r1.place, ref);
+
+    return r1;
+}
+
+exprCompile(Block) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->statement_list, types, literals, functions, vars);
+
+    os << r1.code;
+
+    return {os.str(), ""};
+}
+
+exprCompile(VariableDeclaration) {
+    std::ostringstream os;
+
+    CodegenResult r = exprCompile(root->identifier_list, types, literals, functions, vars);
+
+    os << r.code;
+
+    return {os.str(), ""};
+}
+
+exprCompile(ArrayDeclaration) {
+    std::ostringstream os;
+
+    CodegenResult r;
+
+    r.place = root->identifier;
+
+    if (root->is_global) {
+        os << "@" << r.place << " = global [" << root->size << " x i32] zeroinitializer, align 4";
+        types.emplace(r.place, "@");
+    } else {
+        os << "%" << r.place << " = alloca [" << root->size << " x i32], align 4";
+        types.emplace(r.place, "[" + std::to_string(root->size) + " x i32]* ");
+    }
+
+    return {os.str(), ""};
+}
+
+
+
+exprCompile(Assignment) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->expr, types, literals, functions, vars);
+
+    os << r1.code;
+
+    auto it = types.find(root->identifier);
+    auto v = vars.find(root->identifier);
+
+    if (v == vars.end()) {
+        throw std::runtime_error("Error: Unknown identifier '" + root->identifier + "'");
+    }
+
+    if (it != types.end()) {
+        if (it->second == "*") {
+            os << "store i32 " << r1.place << ", i32* %" << root->identifier << ", align 4\n";
+        } else {
+            CodegenResult param;
+            param.place = newVariable();
+            os << param.place  << " = alloca i32, align 4";
+        }
+        
+    } else {
+        os << "store i32 " << r1.place << ", i32* %" << root->identifier << ", align 4";
+    }
+
+
+    return {os.str(), ""};
+}
+
+exprCompile(ArrayAssignment) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->index_expr, types, literals, functions, vars);
+
+    os << r1.code;
+
+    CodegenResult r2;
+    r2.place = newVariable();
+
+    auto it = types.find(root->array_identifier);
+
+    if (it == types.end()) {
+        throw std::runtime_error("Error: Unknown identifier '" + root->array_identifier + "'");
+    }
+
+    if (it->second == "@") {
+        os << r2.place << " = getelementptr i32, i32* @" << root->array_identifier << ", i32 " << r1.place << "\n";
+    } else {
+        os << r2.place << " = getelementptr i32, i32* %" << root->array_identifier << ", i32 " << r1.place << "\n";
+    }
+
+    CodegenResult r3 = exprCompile(root->expr, types, literals, functions, vars);
+
+    os << r3.code;
+
+    os << "store i32 " << r3.place << ", i32* " << r2.place << "\n"; 
+
+    return {os.str(), ""};
+}
+
+exprCompile(MethodCall) {
+    std::ostringstream os;
+
+    auto method = functions.find(root->identifier);
+
+    if (method == functions.end()) {
+        throw std::runtime_error("Error: Method '" + root->identifier + "' was not declared.");
+    }
+
+    MethodDeclaration* methNode =  static_cast<MethodDeclaration*>(method->second);
+    current_method = methNode->parameter_list;
+
+    ParameterList* params = static_cast<ParameterList*>(methNode->parameter_list);
+
+    int params_count = 0;
+
+    while (params) {
+        params_count++;
+        params = static_cast<ParameterList*>(params->next_node);
+    }
+
+    ArgumentList* args = static_cast<ArgumentList*>(root->argument_list);
+    int args_count = 0;
+    while (args) {
+        args_count++;
+        args = static_cast<ArgumentList*>(args->next_node);
+    }
+
+    if (params_count != args_count) {
+        throw std::runtime_error("Error: Function expected '" + std::to_string(params_count) + "' arguments but received '" + std::to_string(args_count) + "'.");
+    }
+
+    
+    CodegenResult r1;
+
+    if (root->argument_list) {
+        r1 = exprCompile(root->argument_list, types, literals, functions, vars);
+
+        os << r1.code;
+    }
+    
+
+    os << "call void @" << root->identifier << "(";
+
+    if (root->argument_list) {
+        os << r1.place;
+    }
+
+    os << ")\n";
+
+    return {os.str(), ""};
+}
+
+exprCompile(FunctionCall) {
+    std::ostringstream os;
+
+    auto method = functions.find(root->identifier);
+
+    if (method == functions.end()) {
+        throw std::runtime_error("Error: Method '" + root->identifier + "' was not declared.");
+    }
+
+    MethodDeclaration* methNode =  static_cast<MethodDeclaration*>(method->second);
+    current_method = methNode->parameter_list;
+
+    ParameterList* params = static_cast<ParameterList*>(methNode->parameter_list);
+
+    int params_count = 0;
+
+    while (params) {
+        params_count++;
+        params = static_cast<ParameterList*>(params->next_node);
+    }
+
+    ArgumentList* args = static_cast<ArgumentList*>(root->argument_list);
+    int args_count = 0;
+    while (args) {
+        args_count++;
+        args = static_cast<ArgumentList*>(args->next_node);
+    }
+
+    if (params_count != args_count) {
+        throw std::runtime_error("Error: Function expected '" + std::to_string(params_count) + "' arguments but received '" + std::to_string(args_count) + "'.");
+    }
+
+
+    CodegenResult r1;
+
+    if (root->argument_list) {
+        r1 = exprCompile(root->argument_list, types, literals, functions, vars);
+
+        os << r1.code;
+    }
+
+    CodegenResult res;
+    res.place = newVariable();
+
+    os << res.place  << " = call i32 @" << root->identifier << "(";
+
+    if (root->argument_list) {
+        os << r1.place;
+    }
+
+    os << ")\n";
+
+    res.code = os.str();
+
+    return res;
+}
+
+exprCompile(IfStmt) {
+    std::ostringstream os;
+
+    CodegenResult res;
+
+    CodegenResult r1 = exprCompile(root->expr, types, literals, functions, vars);
+
+    os << r1.code << "\n";
+
+    CodegenResult if_stmt;
+    if_stmt.place = newLabel();
+
+    CodegenResult endif;
+    endif.place = newLabel();
+
+    CodegenResult else_stmt;
+    else_stmt.place = newLabel();
+
+    if (root->else_stmts) {
+        os << "br i1 " << r1.place << ", label %" << if_stmt.place << ", label %" << else_stmt.place << "\n";
+
+    } else {
+        os << "br i1 " << r1.place << ", label %" << if_stmt.place << ", label %" << endif.place << "\n";
+    }
+
+    os << if_stmt.place << ":\n";
+
+    CodegenResult r2 = exprCompile(root->if_stmts, types, literals, functions, vars);
+    os << r2.code << "\n";
+    res.place = r2.place;
+
+    bool if_has_return = r2.code.find("ret i32") != std::string::npos;
+
+    if (!if_has_return) {
+        os << "br label %" << endif.place << "\n";
+    }
+
+
+    if(root->else_stmts) {
+        os << else_stmt.place << ":\n";
+
+        CodegenResult r3 = exprCompile(root->else_stmts, types, literals, functions, vars);
+
+        os << r3.code << "\n";
+        res.place = r3.place;
+
+        os << "br label %" << endif.place << "\n";
+    } else {
+        os << "br label %" << endif.place << "\n";
+    }
+
+    os << endif.place << ":\n";
+
+    has_return = false;
+
+    endif.code = os.str();
+
+    return endif;
+
+}
+
+
+exprCompile(WhileStmt) {
+    std::ostringstream os;
+
+    CodegenResult loop;
+    loop.place = newLabel();
+
+    CodegenResult loop_body;
+    loop_body.place = newLabel();
+
+    CodegenResult end_loop;
+    end_loop.place = newLabel();
+
+    os << "br label %" << loop.place << "\n";
+    
+    os << loop.place << ":\n";
+
+    CodegenResult r1 = exprCompile(root->expr, types, literals, functions, vars);
+
+    os << r1.code << "\n";
+    os << "br i1 " << r1.place << ", label %" << loop_body.place << ", label %" << end_loop.place << "\n";
+
+    os << loop_body.place << ":\n";
+
+    CodegenResult r2 = exprCompile(root->stmts, types, literals, functions, vars);
+
+    os << r2.code << "\n";
+
+    CodegenResult inc;
+
+    os << "br label %" << loop.place << "\n";
+
+    os << end_loop.place << ":\n";
+
+    end_loop.code = os.str();
+
+    return end_loop;
+}
+
+exprCompile(PrintStmt) {
+    std::ostringstream os;
+
+    CodegenResult r = exprCompile(root->expr, types, literals, functions, vars);
+
+    os << r.code;
+
+    os << "call i32 (i8*, ...) @printf(i8* @.fmt, i32 " << r.place << ")\n";
+
+    return {os.str(), ""};
+}
+
+exprCompile(PrintStmtLit) {
+    std::ostringstream os;
+
+    std::string text = root->literal;
+
+    if (text.front() == '"' && text.back() == '"') {
+        text = text.substr(1, text.length() - 2);
+    }
+
+    auto it = literals.find(text);
+
+    if (it != literals.end()){
+        os << "call i32 (i8*, ...) @printf(i8* " << it->second << ")";
+    } else {
+        std::string tag = newTag();
+        literals.insert({text, tag});
+        os << "call i32 (i8*, ...) @printf(i8* " << tag << ")";
+    }
+
+    return { os.str(), "" };
+}
+
+exprCompile(ReturnStmt) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->expr, types, literals, functions, vars);
+
+    os << r1.code << "\n";
+
+    os << "ret i32 " << r1.place << "\n";
+
+    has_return = true;
+
+    r1.code = os.str();
+
+    return r1;
+}
+
+//falta
+exprCompile(StringLiteral) {
+    std::ostringstream os;
+
+    os << "StringLiteral(" << root->value << ")";
+
+    return {os.str(), ""};
+}
+
+exprCompile(AddExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    r3.place = newVariable();
+
+    os << r3.place << " = add i32 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r4;
+    r4.place = r3.place;
+    r4.code = os.str();
+
+    return r4; 
+}
+
+exprCompile(SubExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    r3.place = newVariable();
+
+    os << r3.place << " = sub i32 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r4;
+    r4.place = r3.place;
+    r4.code = os.str();
+
+    return r4; 
+}
+
+exprCompile(MulExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    r3.place = newVariable();
+
+    os << r3.place << " = mul i32 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r4;
+    r4.place = r3.place;
+    r4.code = os.str();
+
+    return r4; 
+}
+
+exprCompile(DivExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    r3.place = newVariable();
+
+    os << r3.place << " = sdiv i32 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r4;
+    r4.place = r3.place;
+    r4.code = os.str();
+
+    return r4; 
+}
+
+exprCompile(ModExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    r3.place = newVariable();
+
+    os <<  r3.place << " = srem i32 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r4;
+    r4.place = r3.place;
+    r4.code = os.str();
+
+    return r4; 
+}
+
+exprCompile(GreaterExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    r3.place = newVariable();
+
+    os << r3.place << " = icmp sgt i32 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r4;
+    r4.place = r3.place;
+    r4.code = os.str();
+
+    return r4; 
+}
+
+exprCompile(GreaterEqualExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    r3.place = newVariable();
+
+    os << r3.place << " = icmp sge i32 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r4;
+    r4.place = r3.place;
+    r4.code = os.str();
+
+    return r4; 
+}
+
+exprCompile(LessExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    r3.place = newVariable();
+
+    os << r3.place << " = icmp slt i32 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r4;
+    r4.place = r3.place;
+    r4.code = os.str();
+
+    return r4; 
+}
+
+exprCompile(LessEqualExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    r3.place = newVariable();
+
+    os << r3.place << " = icmp sle i32 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r4;
+    r4.place = r3.place;
+    r4.code = os.str();
+
+    return r4; 
+}
+
+exprCompile(EqualExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    r3.place = newVariable();
+
+    os << r3.place << " = icmp eq i32 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r4;
+    r4.place = r3.place;
+    r4.code = os.str();
+
+    return r4; 
+}
+
+exprCompile(NotEqualExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    r3.place = newVariable();
+
+    os << r3.place << " = icmp ne i32 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r4;
+    r4.place = r3.place;
+    r4.code = os.str();
+
+    return r4; 
+}
+
+exprCompile(AndExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    CodegenResult r4;
+
+    r3.place = newVariable();
+    r4.place = newVariable();
+
+
+    //os << r3.place << " = icmp ne i32 " << r1.place << ", 0\n";
+    //os << r4.place << " = icmp ne i32 " << r2.place << ", 0\n";
+
+    CodegenResult r5;
+    r5.place = newVariable();
+
+    os << r5.place << " = and i1 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r6;
+    r6.place = r5.place;
+    r6.code = os.str();
+
+    return r6; 
+}
+
+exprCompile(OrExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->left, types, literals, functions, vars);
+    os << r1.code << "\n";
+    CodegenResult r2 = exprCompile(root->right, types, literals, functions, vars);
+    os << r2.code << "\n";
+
+    CodegenResult r3;
+    CodegenResult r4;
+
+    r3.place = newVariable();
+    r4.place = newVariable();
+
+    //os << r3.place << " = icmp ne i32 " << r1.place << ", 0\n";
+    //os << r4.place << " = icmp ne i32 " << r2.place << ", 0\n";
+
+    CodegenResult r5;
+    r5.place = newVariable();
+
+    os << r5.place << " = or i1 " << r1.place << ", " << r2.place << "\n";
+
+    CodegenResult r6;
+    r6.place = r5.place;
+    r6.code = os.str();
+
+    return r6; 
+}
+
+exprCompile(Number) {
+    std::ostringstream os;
+
+    CodegenResult r;
+
+    r.code = "";
+    r.place = std::to_string(root->value);
+
+    return r;
+}
+
+exprCompile(Identifier) {
+    std::ostringstream os;
+
+    CodegenResult r;
+
+    auto it = types.find(root->name);
+
+    if (it != types.end()) {
+        if (it->second == "*") {
+            r.place = newVariable();
+            os << r.place << " = load i32, i32* %" << root->name << ", align 4\n";
+        } else if (it->second == "@") {
+            r.place = "* @" + root->name;
+        } else {
+            r.place = "%" + root->name;
+        }
+    } else {
+        r.place = newVariable();
+        os << r.place << " = load i32, i32* %" << root->name << ", align 4\n";
+    }
+
+    r.code = os.str();
+
+    return r;
+}
+
+exprCompile(ArrayVariable) {
+    std::ostringstream os;
+
+    CodegenResult i = exprCompile(root->expr, types, literals, functions, vars);
+
+    os << i.code << "\n";
+
+    CodegenResult arr_ptr;
+    arr_ptr.place = newVariable();
+
+    auto it = types.find(root->identifier);
+
+    if (it == types.end()) {
+    throw std::runtime_error("Error: Unknown identifier '" + root->identifier + "'");
+}
+
+    if (it->second == "@") {
+        os << arr_ptr.place << " = getelementptr i32, i32* @" << root->identifier << ", i32 " << i.place << "\n";
+    } else {
+        os << arr_ptr.place << " = getelementptr i32, i32* %" << root->identifier << ", i32 " << i.place << "\n";
+    }
+
+
+    CodegenResult ptr_value;
+    ptr_value.place = newVariable();
+
+    os << ptr_value.place << " = load i32, i32* " << arr_ptr.place << ", align 4" << "\n";
+
+    ptr_value.code = os.str();
+
+    return ptr_value;
 }

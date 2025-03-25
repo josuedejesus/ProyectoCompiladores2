@@ -7,6 +7,12 @@
  #include <iostream>
  #include "MiniJavaLexer.hpp"   
  #include "MiniJavaParser.hpp"
+
+ int num_lines = 0;
+ int num_chars = 0;
+ int eof_returned = 0;
+
+
 %}
 
 %top{
@@ -23,14 +29,16 @@ DIGIT [0-9]
 
 
 %%
-//\n { num_lines++; num_chars++; }
+[ \t\r ]+ { /* Ignorar espacios en blanco */ }
+
+\n { num_lines++; }
 
 "//".* { /* ignore line comments */ }
 
-"/*"   start(COMMENT);  
+"/*"   { start(COMMENT); };  
 <COMMENT>[^*]+         { /* ignores anything but * */ }
 <COMMENT>"*"+[^*/]*    { /* ignores * */ }
-<COMMENT>"*"+"/"       start(INITIAL);  // block comment end
+<COMMENT>"*"+"/"       { start(INITIAL); }  // block comment end
 <COMMENT><<EOF>>       { std::cerr << "Error: EOF en comentario de bloque\n"; return Token::Error; }
 
 
@@ -76,19 +84,34 @@ DIGIT [0-9]
 
 
 
-{DIGIT}+ {
+("-")?{DIGIT}+ {
     yylval->emplace<int>(std::stol(text(), nullptr, 10));
     return Token::INT_CONST;
 }
 
-\"([^\\\"]|\\.)*\"   { return Token::STRING_LITERAL; }
+\"([^\\\"]|\\.)*\"   { 
+    yylval->emplace<std::string>(text());
+    return Token::STRING_LITERAL; 
+}
 
 [_a-z_A-Z][_a-z_A-Z_0-9]* { 
     yylval->emplace<std::string>(text());
     return Token::IDENTIFIER; 
 }
-[ \t\r\n]+ { /* Ignorar espacios en blanco */ }
-<<EOF>> { return Token::EndOfFile; }
-. { return Token::Error; }
+
+
+. { 
+    num_chars++; 
+    return Token::Error;
+ }
+
+<<EOF>> {
+    if (eof_returned == 0) {  
+        eof_returned = 1;
+        return Token::EndOfFile;
+    } else {
+        return 0; 
+    }
+}
 
 %%

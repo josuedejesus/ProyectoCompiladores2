@@ -12,25 +12,50 @@ int main(int argc, char *argv[]) {
     }
 
     std::string fileName = argv[1];
+    std::string outFileName = fileName.substr(0, fileName.length() - 5) + ".ll";
 
     std::ifstream inputFile(fileName);
+    std::ofstream outputFile(outFileName);
 
     if (!inputFile) {
-        std::cerr << "Cannot open " << fileName << std::endl;
+        std::cerr << "Cannot open " << fileName << "\n";
         return 1;
     }
 
-    std::unordered_map<std::string, int> vars;
+    std::unordered_map<std::string, std::string> types;
+    std::unordered_map<std::string, std::string> literals;
+    std::unordered_map<std::string, std::string> vars;
+    function_table_t functions;
 
     Ast::Node *root;
     MiniJavaLexer lex(inputFile);
-    Expr::Parser parser(lex, vars);
+    Expr::Parser parser(lex, root);
 
     try {
         parser.parse();
-        std::cout << root->toString() << '\n';
-        std::cout << "Eval: " << eval(root, vars) << '\n';
-        //std::cout << Ast::toString() << '\n';
+        CodegenResult r = Ast::exprCompile(root, types, literals, functions, vars);
+
+        if (!outputFile) {
+            std::cerr << "Cannot open " << outFileName << "\n";
+            return 1;
+        }
+
+        outputFile << r.code;
+        outputFile.close();
+
+        /*std::cout << root->toString() << '\n';
+        std::cout << r.code << std::endl;
+
+        for (const auto& pair : vars) {
+            std::cout << "Variable: " << pair.first << " -> Tipo: " << pair.second << std::endl;
+        }
+
+        for (const auto& pair : functions) {
+            std::cout << "Funcion: " << pair.first << " -> Nodo: " << pair.second << std::endl;
+        }*/
+
+        std::cout << "Sucess: Code generation finished without errors.\n";
+
     } catch (const std::runtime_error &err) {
         std::cerr << err.what() << '\n';
         return 1;
