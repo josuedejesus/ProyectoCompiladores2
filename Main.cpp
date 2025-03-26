@@ -54,7 +54,7 @@ int main(int argc, char *argv[]) {
             std::cout << "Funcion: " << pair.first << " -> Nodo: " << pair.second << std::endl;
         }*/
 
-        std::cout << "Sucess: Code generation finished without errors.\n";
+        std::cout << "Success: Code generation finished without errors.\n";
 
     } catch (const std::runtime_error &err) {
         std::cerr << err.what() << '\n';

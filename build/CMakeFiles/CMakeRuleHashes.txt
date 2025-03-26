@@ -1,0 +1,4 @@
+# Hashes of file build rules.
+ce62dc2ba6fb35ba55e82bade8b7a584 MiniJavaAst.cpp
+657023780c98970b440ec06b13e0725d MiniJavaLexer.cpp
+0213985a821a271921cdd14e09c4a8ac MiniJavaParser.cpp

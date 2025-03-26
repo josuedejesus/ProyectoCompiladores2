@@ -1,0 +1,3 @@
+/home/josuedejesus/ProyectoCompiladores2/build/CMakeFiles/MiniJavaEval.dir
+/home/josuedejesus/ProyectoCompiladores2/build/CMakeFiles/edit_cache.dir
+/home/josuedejesus/ProyectoCompiladores2/build/CMakeFiles/rebuild_cache.dir
