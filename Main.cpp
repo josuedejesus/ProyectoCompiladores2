@@ -24,7 +24,7 @@ int main(int argc, char *argv[]) {
 
     std::unordered_map<std::string, std::string> types;
     std::unordered_map<std::string, std::string> literals;
-    std::unordered_map<std::string, std::string> vars;
+    std::unordered_map<std::string, bool> vars;
     function_table_t functions;
 
     Ast::Node *root;
@@ -43,18 +43,19 @@ int main(int argc, char *argv[]) {
         outputFile << r.code;
         outputFile.close();
 
-        /*std::cout << root->toString() << '\n';
+        //std::cout << root->toString() << '\n';
         std::cout << r.code << std::endl;
 
-        for (const auto& pair : vars) {
+        /*for (const auto& pair : types) {
             std::cout << "Variable: " << pair.first << " -> Tipo: " << pair.second << std::endl;
-        }
+        }*/
+        
 
-        for (const auto& pair : functions) {
+        /*for (const auto& pair : functions) {
             std::cout << "Funcion: " << pair.first << " -> Nodo: " << pair.second << std::endl;
         }*/
 
-        std::cout << "Success: Code generation finished without errors.\n";
+        //std::cout << "Success: Code generation finished without errors.\n";
 
     } catch (const std::runtime_error &err) {
         std::cerr << err.what() << '\n';

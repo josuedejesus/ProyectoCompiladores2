@@ -22,7 +22,7 @@
     };
 
     using string_t = std::string;
-    using symbol_table_t = std::unordered_map<std::string, std::string>;
+    using symbol_table_t = std::unordered_map<std::string, bool>;
     using type_table_t = std::unordered_map<std::string, std::string>;
     using literal_table_t = std::unordered_map<std::string, std::string>;
     using function_table_t = std::unordered_map<std::string, Ast::Node*>;
@@ -219,8 +219,14 @@ bool has_return = false;
     BooleanExpr *right;
 }
 
+%node UnaryBooleanExpr BooleanExpr %abstract = {
+    Expr *expr;
+}
+
 %node AndExpr BinaryBooleanExpr
 %node OrExpr BinaryBooleanExpr
+
+%node NotExpr UnaryBooleanExpr
 
 %node RelationalExpr BooleanExpr %abstract %typedef
 
@@ -624,6 +630,14 @@ toString(OrExpr) {
     return os.str(); 
 }
 
+toString(NotExpr) {
+    std::ostringstream os;
+
+    os << "OrExpr(" << node->expr->toString() << ", " << node->expr->toString() << ")";
+
+    return os.str(); 
+}
+
 toString(Number) {
     return std::to_string(node->value);
 }
@@ -728,20 +742,20 @@ exprCompile(ArgumentList) {
 exprCompile(VariableList) {
     std::ostringstream os;
 
-    auto it = types.find(root->identifier);
+    auto it = vars.find(root->identifier);
 
-    if (it != types.end()) {
+    if (it != vars.end()) {
         throw std::runtime_error("Variable \"" + root->identifier + "\" already declared.");
     }
 
     if(root->is_global) {
         os << "@" << root->identifier << " = global i32 0, align 4\n";
         types.emplace(root->identifier, "@");
-        vars.emplace(root->identifier, "");
+        vars.insert({root->identifier, true});
     } else {
         os << "%" << root->identifier << " = alloca i32, align 4\n";
         //types.emplace(root->identifier, "");
-        vars.emplace(root->identifier, "");
+        vars.insert({root->identifier, false});
     }
 
     if (root->next_node) {
@@ -783,6 +797,22 @@ exprCompile(MethodDeclaration) {
 
     os << "}\n";
 
+    for (auto it = vars.begin(); it != vars.end();) {
+        if (!it->second) {
+            it = vars.erase(it);  
+        } else {
+            ++it; 
+        }
+    }
+
+    for (auto ty = types.begin(); ty != types.end();) {
+        if (ty->second != "@") {
+            ty = types.erase(ty);  
+        } else {
+            ++ty; 
+        } 
+    }
+
     return {os.str(), ""};
 }
 
@@ -818,7 +848,7 @@ exprCompile(Parameter) {
     r1.code = os.str();
 
     types.emplace(r1.place, type);
-    vars.emplace(r1.place, "");
+    vars.emplace(r1.place, false);
 
 
     return r1;
@@ -874,7 +904,6 @@ exprCompile(ArrayParameter) {
 
     std::string ref = "";
 
-    //CodegenResult index = exprCompile(root->expr, types, literals, functions, vars);
 
     os << "[" << std::to_string(root->index) << " x i32]*";
 
@@ -938,14 +967,22 @@ exprCompile(ArrayDeclaration) {
 
     CodegenResult r;
 
+    auto it = vars.find(root->identifier);
+
+    if (it != vars.end()) {
+        throw std::runtime_error("Variable \"" + root->identifier + "\" already declared.");
+    }
+
     r.place = root->identifier;
 
     if (root->is_global) {
         os << "@" << r.place << " = global [" << root->size << " x i32] zeroinitializer, align 4";
         types.emplace(r.place, "@");
+        vars.emplace(r.place, true);
     } else {
         os << "%" << r.place << " = alloca [" << root->size << " x i32], align 4";
         types.emplace(r.place, "[" + std::to_string(root->size) + " x i32]* ");
+        vars.emplace(r.place, false);
     }
 
     return {os.str(), ""};
@@ -970,6 +1007,8 @@ exprCompile(Assignment) {
     if (it != types.end()) {
         if (it->second == "*") {
             os << "store i32 " << r1.place << ", i32* %" << root->identifier << ", align 4\n";
+        } else if (it->second == "@") {
+            os << "store i32 " << r1.place << ", i32* @" << root->identifier << ", align 4\n";
         } else {
             CodegenResult param;
             param.place = newVariable();
@@ -1530,10 +1569,6 @@ exprCompile(AndExpr) {
     r3.place = newVariable();
     r4.place = newVariable();
 
-
-    //os << r3.place << " = icmp ne i32 " << r1.place << ", 0\n";
-    //os << r4.place << " = icmp ne i32 " << r2.place << ", 0\n";
-
     CodegenResult r5;
     r5.place = newVariable();
 
@@ -1560,9 +1595,6 @@ exprCompile(OrExpr) {
     r3.place = newVariable();
     r4.place = newVariable();
 
-    //os << r3.place << " = icmp ne i32 " << r1.place << ", 0\n";
-    //os << r4.place << " = icmp ne i32 " << r2.place << ", 0\n";
-
     CodegenResult r5;
     r5.place = newVariable();
 
@@ -1573,6 +1605,23 @@ exprCompile(OrExpr) {
     r6.code = os.str();
 
     return r6; 
+}
+
+exprCompile(NotExpr) {
+    std::ostringstream os;
+
+    CodegenResult r1 = exprCompile(root->expr, types, literals, functions, vars);
+    os << r1.code << "\n";
+
+    CodegenResult r2;
+    r2.place = newVariable();
+    os << r2.place << " = xor i1 " << r1.place << ", true\n";
+
+    CodegenResult r3;
+    r3.place = r2.place;
+    r3.code = os.str();
+
+    return r3; 
 }
 
 exprCompile(Number) {
@@ -1598,7 +1647,8 @@ exprCompile(Identifier) {
             r.place = newVariable();
             os << r.place << " = load i32, i32* %" << root->name << ", align 4\n";
         } else if (it->second == "@") {
-            r.place = "* @" + root->name;
+            r.place = newVariable();
+            os << r.place << " = load i32, i32* @" << root->name << ", align 4\n";
         } else {
             r.place = "%" + root->name;
         }

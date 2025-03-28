@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/MiniJavaEval.dir/MiniJavaAst.cpp.o CMakeFiles/MiniJavaEval.dir/MiniJavaLexer.cpp.o CMakeFiles/MiniJavaEval.dir/MiniJavaParser.cpp.o CMakeFiles/MiniJavaEval.dir/Main.cpp.o -o MiniJavaEval  /usr/local/lib/libreflex_static_lib.a 

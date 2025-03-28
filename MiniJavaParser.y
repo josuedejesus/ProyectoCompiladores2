@@ -36,9 +36,6 @@
     }
 %}
 
-
-
-
 %token OP_ADD "+"
 %token OP_SUB "-"
 %token OP_MUL "*"
@@ -84,12 +81,9 @@
 %token EndOfFile "EOF"
 
 %type <Ast::Expr *> expr term factor array_variable
-%type <Ast::Node *> identifier
 %type <Ast::Node *> class_body
 %type <Ast::Node *> class_member
 %type <Ast::Node *> method_declaration
-%type <Ast::Node *> type
-%type <Ast::Node *> method_return_type
 %type <Ast::Node *> opt_parameter_list
 %type <Ast::Node *> parameter
 %type <Ast::Node *> argument_list
@@ -132,20 +126,31 @@ class_member: method_declaration {
     }
     $$ = $1;
 } | variable_decl {
+    if (auto varDecl = dynamic_cast<Ast::VariableDeclaration*>($1)) {
+        auto list = dynamic_cast<Ast::VariableList*>(varDecl->identifier_list);
+        
+        while (list) {
+            if (auto l = dynamic_cast<Ast::VariableList*>(list)) {
+                list->is_global = true;
+                Ast::VariableList* next = static_cast<Ast::VariableList*>(list->next_node);
+                list = next; 
+            }
+        }
+    }
     $$ = $1;
 }
 
-identifier: IDENTIFIER {
-    $$ = new Ast::Identifier($1);
-}
-
-method_declaration: method_return_type IDENTIFIER OPEN_PAR opt_parameter_list CLOSE_PAR OPEN_CURLY block CLOSE_CURLY {
-    $$ = new Ast::MethodDeclaration($1, $2, $4, $7);
-} | method_return_type IDENTIFIER OPEN_PAR CLOSE_PAR OPEN_CURLY block CLOSE_CURLY {
-    $$ = new Ast::MethodDeclaration($1, $2, nullptr, $6);
+method_declaration: KW_INT IDENTIFIER OPEN_PAR opt_parameter_list CLOSE_PAR OPEN_CURLY block CLOSE_CURLY {
+    $$ = new Ast::MethodDeclaration(new Ast::Type("int"), $2, $4, $7);
+} | KW_INT IDENTIFIER OPEN_PAR CLOSE_PAR OPEN_CURLY block CLOSE_CURLY {
+    $$ = new Ast::MethodDeclaration(new Ast::Type("int"), $2, nullptr, $6);
+} | KW_VOID IDENTIFIER OPEN_PAR opt_parameter_list CLOSE_PAR OPEN_CURLY block CLOSE_CURLY {
+    $$ = new Ast::MethodDeclaration(new Ast::Type("void"), $2, $4, $7);
+} | KW_VOID IDENTIFIER OPEN_PAR CLOSE_PAR OPEN_CURLY block CLOSE_CURLY {
+    $$ = new Ast::MethodDeclaration(new Ast::Type("void"), $2, nullptr, $6);
 };
 
-variable_decl: type variable_list SEMICOLON {
+variable_decl: KW_INT variable_list SEMICOLON {
     $$ = new Ast::VariableDeclaration($2);
 };
 
@@ -163,13 +168,7 @@ array_variable: IDENTIFIER OPEN_BRACKET expr CLOSE_BRACKET {
     $$ = new Ast::ArrayVariable($1, $3);
 }
 
-method_return_type: KW_VOID {
-    $$ = new Ast::Type("void");
-} | KW_INT {
-    $$ = new Ast::Type("int");
-};
 
-type: KW_INT;
 
 opt_parameter_list: parameter {
     $$ = new Ast::ParameterList($1, nullptr);
@@ -278,8 +277,8 @@ boolean_term: boolean_term OP_BOOL_AND boolean_factor {
 };
 
 boolean_factor: relational_expr {  
-    $$ = $1;  
-};
+        $$ = $1;  
+    };
 
 relational_expr: expr OP_GREATER_THAN expr {
         $$ = new Ast::GreaterExpr($1, $3);
@@ -293,7 +292,7 @@ relational_expr: expr OP_GREATER_THAN expr {
         $$ = new Ast::NotEqualExpr($1, $3);
     } | expr OP_EQUAL expr {
         $$ = new Ast::EqualExpr($1, $3);
-    }
+    };
 
 expr: 
     expr "+" term { 
@@ -325,5 +324,5 @@ factor: INT_CONST {
     $$ = new Ast::FunctionCall($1, $3);
 } | IDENTIFIER OPEN_PAR CLOSE_PAR {
     $$ = new Ast::FunctionCall($1, nullptr);
-}
+} 
 %%
